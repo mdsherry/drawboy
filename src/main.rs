@@ -1,3 +1,4 @@
+use egui_extras::{Size, StripBuilder};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -7,7 +8,7 @@ use std::{
 };
 use wif::{parse, Shaft, Warp, Weft, Wif};
 
-use eframe::egui::{self, Button, Color32, DragValue, Grid, Layout, RichText, Stroke};
+use eframe::egui::{self, Button, Color32, DragValue, Grid, Layout, RichText, Stroke, Vec2};
 
 fn main() -> eframe::Result {
     env_logger::init();
@@ -16,7 +17,7 @@ fn main() -> eframe::Result {
     wif.build_or_validate_liftplan().unwrap();
 
     let options = eframe::NativeOptions {
-        viewport: if cfg!(target_arch = "arm") {
+        viewport: if cfg!(feature = "rpi") {
             egui::ViewportBuilder::default().with_fullscreen(true)
         } else {
             egui::ViewportBuilder::default().with_inner_size([1024., 600.])
@@ -97,15 +98,37 @@ impl MyApp {
                 }
             });
         }
+        let row;
+        let warp;
+        let mode;
+        if let Some(storage) = cc.storage {
+            row = storage
+                .get_string("row")
+                .and_then(|s| s.parse::<u32>().ok());
+            warp = storage
+                .get_string("warp")
+                .and_then(|s| s.parse::<u32>().ok());
+            mode = storage.get_string("mode").and_then(|s| match s.as_str() {
+                "liftplan" => Some(OperationMode::Liftplan),
+                "treadling" => Some(OperationMode::Treadling),
+                "threading" => Some(OperationMode::Threading),
+                _ => None,
+            });
+        } else {
+            row = None;
+            warp = None;
+            mode = None;
+        }
+
         Self {
-            row: 1,
-            warp: 1,
+            row: row.unwrap_or(1),
+            warp: warp.unwrap_or(1),
             average_row_speed: Ewma::new(0.1),
             last_t: Instant::now(),
             wif: Arc::new(RwLock::new(wif)),
             timer_paused: false,
             pedal_pressed,
-            mode: OperationMode::Liftplan,
+            mode: mode.unwrap_or(OperationMode::Liftplan),
             threading_mode: ThreadingMode::Continuous,
             threading_batch_size: 8,
         }
@@ -341,101 +364,115 @@ impl MyApp {
         });
     }
 
-    fn show_threading(&mut self, ui: &mut egui::Ui, wif: Wif, shafts: u32) {
+    fn show_threading(&mut self, ui: &mut egui::Ui, wif: Wif, shaft_count: u32, last_row: u32) {
+        ui.spacing_mut().item_spacing = Vec2::new(3., 3.);
         let cols = self.threading_batch_size;
-        ui.set_max_width(24. * cols as f32);
-        Grid::new("threading")
-            .num_columns(cols as _)
-            .min_col_width(16.)
-            .show(ui, |ui| {
-                let range = if self.threading_mode == ThreadingMode::Continuous {
-                    (self.warp as i32 - 2..).take(cols as usize)
-                } else {
-                    let start = ((self.warp - 1) / self.threading_batch_size
-                        * self.threading_batch_size) as i32
-                        + 1;
-                    (start..).take(cols as usize)
-                };
-                let threading: Vec<_> = range
-                    .clone()
-                    .map(|thread| {
-                        (
-                            thread,
-                            if thread <= 0 {
-                                None
-                            } else {
-                                wif.threading
-                                    .as_ref()
-                                    .and_then(|threading| threading.get(&(thread as u32).into()))
-                            },
-                        )
-                    })
-                    .collect();
-                // TODO: Color row
-                for thread in range {
-                    let (bg_color, stroke_color) = if thread <= 0 {
-                        (Color32::TRANSPARENT, Color32::TRANSPARENT)
+        let range = if self.threading_mode == ThreadingMode::Continuous {
+            (self.warp as i32 - 2..).take(cols as usize)
+        } else {
+            let start = ((self.warp - 1) / self.threading_batch_size * self.threading_batch_size)
+                as i32
+                + 1;
+            (start..).take(cols as usize)
+        };
+        let threading: Vec<_> = range
+            .clone()
+            .map(|thread| {
+                (
+                    thread,
+                    if thread <= 0 {
+                        None
                     } else {
-                        let colour = wif
-                            .warp_color_u8(Warp::from(thread as u32))
-                            .unwrap_or_default();
-                        (
-                            Color32::from_rgb(colour[0], colour[1], colour[2]),
-                            Color32::WHITE,
-                        )
-                    };
+                        wif.threading
+                            .as_ref()
+                            .and_then(|threading| threading.get(&(thread as u32).into()))
+                    },
+                )
+            })
+            .collect();
+        StripBuilder::new(ui)
+            .sizes(Size::relative(1. / ((cols + 1) as f32)), cols as usize)
+            .horizontal(|mut strip| {
+                for &(thread, ref shafts) in &threading {
+                    strip.strip(|sb| {
+                        sb.size(Size::exact(16.))
+                            .sizes(
+                                Size::relative(1. / ((shaft_count + 1) as f32)),
+                                shaft_count as usize,
+                            )
+                            .vertical(|mut strip| {
+                                let (bg_color, stroke_color) =
+                                    if thread <= 0 || thread > last_row as i32 {
+                                        (Color32::TRANSPARENT, Color32::TRANSPARENT)
+                                    } else {
+                                        let colour = wif
+                                            .warp_color_u8(Warp::from(thread as u32))
+                                            .unwrap_or_default();
+                                        (
+                                            Color32::from_rgb(colour[0], colour[1], colour[2]),
+                                            Color32::WHITE,
+                                        )
+                                    };
 
-                    let frame = eframe::egui::Frame::none()
-                        .inner_margin(2.)
-                        .fill(bg_color)
-                        .stroke(Stroke::new(1., stroke_color));
-
-                    frame.show(ui, |ui| {
-                        ui.vertical_centered_justified(|ui| {
-                            ui.label(RichText::new(" ").size(12.));
-                        });
-                    });
-                }
-
-                ui.end_row();
-
-                for shaft in 1..=shafts {
-                    for &(col_num, ref col) in &threading {
-                        let highlight_color = if col_num == self.warp as i32 {
-                            Color32::WHITE
-                        } else {
-                            Color32::DARK_GRAY
-                        };
-                        let dark_color = if col_num == self.warp as i32 {
-                            Color32::DARK_GRAY
-                        } else {
-                            Color32::BLACK
-                        };
-
-                        ui.vertical_centered_justified(|ui| {
-                            if let Some(shafts) = col {
-                                if shafts.contains(&Shaft::from(shaft)) {
-                                    let frame = eframe::egui::Frame::none()
-                                        .fill(dark_color)
-                                        .inner_margin(2.)
-                                        .stroke(Stroke::new(1., highlight_color));
+                                let frame = eframe::egui::Frame::none()
+                                    .inner_margin(0.)
+                                    .outer_margin(0.)
+                                    .fill(bg_color)
+                                    .stroke(Stroke::new(1., stroke_color));
+                                strip.cell(|ui| {
                                     frame.show(ui, |ui| {
-                                        ui.label(
-                                            RichText::new(shaft.to_string())
-                                                .size(12.)
-                                                .color(highlight_color),
-                                        );
+                                        ui.vertical_centered_justified(|ui| {
+                                            ui.label(RichText::new(" ").size(12.));
+                                        });
                                     });
-                                } else {
-                                    ui.label(RichText::new(" ").size(12.));
+                                });
+
+                                for shaft in 1..=shaft_count {
+                                    let highlight_color = if thread == self.warp as i32 {
+                                        Color32::WHITE
+                                    } else {
+                                        Color32::DARK_GRAY
+                                    };
+                                    let dark_color = if thread == self.warp as i32 {
+                                        Color32::DARK_GRAY
+                                    } else {
+                                        Color32::BLACK
+                                    };
+
+                                    if let Some(shafts) = shafts {
+                                        if shafts.contains(&Shaft::from(shaft)) {
+                                            let frame = eframe::egui::Frame::none()
+                                                .fill(dark_color)
+                                                .inner_margin(2.)
+                                                .outer_margin(0.)
+                                                .stroke(Stroke::new(1., highlight_color));
+                                            strip.cell(|ui| {
+                                                ui.with_layout(
+                                                    ui.layout()
+                                                        .with_cross_justify(true)
+                                                        .with_cross_align(egui::Align::Center)
+                                                        .with_main_justify(true),
+                                                    |ui| {
+                                                        frame.show(ui, |ui| {
+                                                            ui.label(
+                                                                RichText::new(shaft.to_string())
+                                                                    .size(18.)
+                                                                    .color(highlight_color),
+                                                            );
+                                                        });
+                                                    },
+                                                );
+                                            });
+                                        } else {
+                                            strip.empty();
+                                        }
+                                    } else {
+                                        // Placeholder
+                                        strip.empty();
+                                    }
                                 }
-                            } else {
-                                // Placeholder
-                                ui.label(RichText::new(" ").size(12.));
-                            }
-                        });
-                    }
-                    ui.end_row();
+                            });
+                    });
                 }
             });
     }
@@ -476,6 +513,20 @@ impl Ewma {
 }
 
 impl eframe::App for MyApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string("row", self.row.to_string());
+        storage.set_string("warp", self.warp.to_string());
+        storage.set_string(
+            "mode",
+            match self.mode {
+                OperationMode::Liftplan => "liftplan",
+                OperationMode::Treadling => "treadling",
+                OperationMode::Threading => "threading",
+            }
+            .to_string(),
+        );
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.set_zoom_factor(1.5);
         let wif = self.wif.read().unwrap().clone();
@@ -486,30 +537,21 @@ impl eframe::App for MyApp {
             false
         };
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        let last_row = if self.threading_mode() {
+            wif.warp.as_ref().map(|wefts| wefts.threads).unwrap_or(1)
+        } else {
+            wif.weft.as_ref().map(|wefts| wefts.threads).unwrap_or(1)
+        };
+        let shafts = if self.mode == OperationMode::Liftplan || self.threading_mode() {
+            wif.shafts().unwrap_or(4)
+        } else {
+            wif.treadles().unwrap_or(6)
+        };
+
+        egui::TopBottomPanel::top("menubar").show(ctx, |ui| {
             self.menus(ui, ctx);
-            ui.heading("Drawboy");
-
-            if let Some(text) = &wif.text {
-                if let Some(title) = &text.title {
-                    ui.label(format!("Title: {title}"));
-                }
-                if let Some(author) = &text.author {
-                    ui.label(format!("Author: {author}"));
-                }
-            }
-
-            let last_row = if self.threading_mode() {
-                wif.warp.as_ref().map(|wefts| wefts.threads).unwrap_or(1)
-            } else {
-                wif.weft.as_ref().map(|wefts| wefts.threads).unwrap_or(1)
-            };
-            let shafts = if self.mode == OperationMode::Liftplan || self.threading_mode() {
-                wif.shafts().unwrap_or(4)
-            } else {
-                wif.treadles().unwrap_or(6)
-            };
-
+        });
+        egui::SidePanel::left("left panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.set_max_width(64.);
@@ -538,18 +580,30 @@ impl eframe::App for MyApp {
                         self.last_t = Instant::now();
                     }
                 });
-
-                ui.group(|ui| {
-                    if self.mode == OperationMode::Threading {
-                        self.show_threading(ui, wif, shafts);
-                    } else {
-                        self.show_liftplan(ui, wif, shafts, last_row);
-                    }
-                });
             });
-            // ui.image(egui::include_image!(
-            //     "../../../crates/egui/assets/ferris.png"
-            // ));
         });
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.heading("Drawboy");
+
+            if let Some(text) = &wif.text {
+                if let Some(title) = &text.title {
+                    ui.label(format!("Title: {title}"));
+                }
+                if let Some(author) = &text.author {
+                    ui.label(format!("Author: {author}"));
+                }
+            }
+
+            ui.group(|ui| {
+                if self.mode == OperationMode::Threading {
+                    self.show_threading(ui, wif, shafts, last_row);
+                } else {
+                    self.show_liftplan(ui, wif, shafts, last_row);
+                }
+            });
+        });
+        // ui.image(egui::include_image!(
+        //     "../../../crates/egui/assets/ferris.png"
+        // ));
     }
 }
