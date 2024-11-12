@@ -12,4 +12,6 @@ egui_extras = "0.29.1"
 env_logger = "0.11.5"
 rfd = { version = "0.15.0", features = [] }
 rppal = { version = "0.19.0", optional = true }
-wif = { version = "0.1.0", path = "../wif" }
+serde = { version = "1.0.214", features = ["derive"] }
+serde_json = "1.0.132"
+wif = { version = "0.1.0", git = "http://github.com/mdsherry/wif.git" }

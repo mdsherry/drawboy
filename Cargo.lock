@@ -973,6 +973,8 @@ dependencies = [
  "env_logger",
  "rfd",
  "rppal",
+ "serde",
+ "serde_json",
  "wif",
 ]
 
@@ -2785,6 +2787,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.132"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
+dependencies = [
+ "itoa",
+ "memchr",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "serde_repr"
 version = "0.1.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3574,6 +3588,7 @@ checksum = "7219d36b6eac893fa81e84ebe06485e7dcbb616177469b142df14f1f4deb1311"
 [[package]]
 name = "wif"
 version = "0.1.0"
+source = "git+http://github.com/mdsherry/wif.git#52fe5cb4cef2e6ce52745906a2a023dac219ff23"
 dependencies = [
  "chrono",
  "configparser",
