@@ -1,4 +1,5 @@
 
 [build]
+
 [target.armv7-unknown-linux-gnueabihf]
-linker = "arm-none-linux-gnueabihf-gcc"
+linker = "arm-linux-gnueabihf-gcc"
