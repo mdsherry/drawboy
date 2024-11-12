@@ -2,6 +2,7 @@
 name = "drawboy"
 version = "0.1.0"
 edition = "2021"
+repository = "https://github.com/mdsherry/drawboy"
 
 [features]
 rpi = ["rppal"]
@@ -15,3 +16,8 @@ rppal = { version = "0.19.0", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
 serde_json = "1.0.132"
 wif = { version = "0.1.0", git = "http://github.com/mdsherry/wif.git" }
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
